@@ -1,0 +1,222 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "import tensorflow as tf\n",
+    "from matplotlib import pyplot as plt\n",
+    "from sklearn import feature_extraction\n",
+    "from sklearn import manifold\n",
+    "\n",
+    "import glove\n",
+    "import text_utils\n",
+    "\n",
+    "\n",
+    "%load_ext autoreload\n",
+    "%autoreload 2\n",
+    "\n",
+    "# tf.debugging.enable_check_numerics()\n",
+    "\n",
+    "min_term_frequency = 50\n",
+    "skip_grams_window = 5\n",
+    "batch_size = 2*1024\n",
+    "train_new_model = True\n",
+    "vector_dims = 50"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "Urk_dataset_Glove = pd.read_csv('data/clusteranglo2.csv')\n",
+    "text = Urk_dataset_Glove['text']\n",
+    "text = text.apply(text_utils.clean_text)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# stopwords <- c(tm::stopwords(\"english\"), tm::stopwords(\"french\"), \"wont\", \"reuters\", \"gt\", \"marketsnews\", \"rbssfinancialservicesandrealestatenews\", \"com\", \"update\", \"bondsnews\", \"breaking\", \"amp\", \"says\", \"see\", \"well\", \"needs\", \"pr\", \"re\", \"ukraines\", \"think\", \"go\", \"mt\", \"cant\", \"wants\", \"doesnt\", \"said\", \"ht\", \"will\", \"f\", \"b\", \"e\",\"h\", \"w\", \"isnt\", \"ap\", \"pm\", \"st\", \"g\", \"r\", \"n\", \"ueu\", \"ucueuuauu\", \"uuuuuuu\", \"x\", \"uufue\", \"uuua\",\"uduu\", \"ufua\", \"u\", \"uuueu\", \"uueuu\", \"uuuueu\", \"ufuduuaueuuu\", \"ufuduuaueuuuu\", \"le\", \"la\", \"du\", \"s\", \"un\", \"et\", \"des\",  \"im\", \"ive\", \"uu\", \"t.co\", \"RT\", \"rt\", \"http\", \"httpt\", \"u0404u0432u0440u043eu043cu0430u0439u0434u0430u043d\", \"russia\", \"russian\", \"russians\", \"ukrainians\", \"crimean\", \"crimea\", \"httptco\", \"uuuueucuuuuud\",\"ukraine\", \"ukrainian\", \"russia\", \"sochi2014\", \"olympics\", \"euromaidan\", \"sochi\", \"good\", \"president\", \"obama\", \"hockey\", \"even\", \"many\", \"olympic\", \"start\", \"much\", \"just\", \"another\", \"last\", \"calls\", \"way\", \"join\", \"next\", \"way\", \"going\", \"still\", \"back\", \"people\", \"russias\", \"putins\", \"support\", \"presid\", \"uuauuuudu\", \"udu\", \"ask\", \"httpc\", \"htt\", \"photo\", \"move\", \"year\", \"must\", \"tell\", \"week\", \"dec\", \"let\", \"eas\", \"meet\", \"maidan\", \"gold\", \"day\", \"time\", \"video\", \"watch\", \"digitalmaidan\", \"today\", \"live\", \"peopl\", \"cdnpoli\", \"militari\", \"crisi\", \"protest\", \"canada\", \"kiev\", \"kyiv\", \"get\", \"one\", \"new\", \"dont\", \"news\",\"can\", \"use\", \"putin\", \"russia\", \"ukrain\", \"call\", \"show\", \"need\", \"via\", \"updat\", \"march\", \"feb\", \"want\", \"rt\", \"rbssfinancialservicesandrealestatenew\", \"may\", \"say\", \"know\", \"bondsnew\", \"marketnews\", \"marketsnew\", \"usdollarrpt\", \"stock\", \"olymp\", \"look\", \"give\", \"make\", \"talk\", \"like\", \"now\",\"tcot\", \"take\")\n",
+    "# it = itoken(Urk_dataset_Glove$text[132730:224885], tolower, tokenizer = word_tokenizer)\n",
+    "\n",
+    "tokenizer = text_utils.create_tokenizer('tweet', preserve_case=False, strip_handles=True)\n",
+    "stopwords = text_utils.load_stopwords('english', 'french', custom_list=True)\n",
+    "\n",
+    "# v = create_vocabulary(it, stopwords = stopwords)\n",
+    "\n",
+    "word_vectorizer = feature_extraction.text.CountVectorizer(\n",
+    "    tokenizer=tokenizer,\n",
+    "    stop_words=stopwords,\n",
+    ")\n",
+    "word_frequencies = np.sum(word_vectorizer.fit_transform(text), axis=0)\n",
+    "\n",
+    "\n",
+    "vocabulary_df = pd.DataFrame(word_vectorizer.vocabulary_.items(), columns=['token', 'ix']).set_index(['ix'])\n",
+    "vocabulary_df['freq'] = pd.DataFrame(word_frequencies.T)\n",
+    "vocabulary_df.sort_index(inplace=True)\n",
+    "vocabulary_df"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# #remove very common and uncommon words\n",
+    "# v <- prune_vocabulary(v, term_count_min = 600L)\n",
+    "\n",
+    "vocabulary_df: pd.DataFrame = vocabulary_df.loc[vocabulary_df['freq'] >= min_term_frequency].reset_index(drop=True)\n",
+    "vocab_size = vocabulary_df.shape[0]\n",
+    "vocabulary = dict(zip(vocabulary_df.token, vocabulary_df.index))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "word_vectorizer = feature_extraction.text.CountVectorizer(\n",
+    "    tokenizer=tokenizer,\n",
+    "    vocabulary=vocabulary\n",
+    ")\n",
+    "\n",
+    "# dtm = create_dtm(it, vectorizer)\n",
+    "# tcm <- create_tcm(it, vectorizer, skip_grams_window = 5L)\n",
+    "# Document term matrix\n",
+    "dtm = word_vectorizer.fit_transform(text)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# glove <- GlobalVectors$new(rank = 50, x_max = 20)\n",
+    "# wv_main = glove$fit_transform(tcm, n_iter = 150, convergence_tol = 0.01)\n",
+    "if train_new_model:\n",
+    "    tcm = glove.create_tcm(tokenizer=tokenizer, vocabulary=vocabulary, corpus=text, skip_grams_window=skip_grams_window)\n",
+    "    print(tcm[:10,:10])\n",
+    "    plt.figure(figsize=[20, 20])\n",
+    "    plt.matshow(tcm)\n",
+    "    epochs = 1\n",
+    "    model, word_vectors = glove.train_embeddings(\n",
+    "        tcm=tcm,\n",
+    "        vector_dims=vector_dims,\n",
+    "        batch_size=batch_size*2,\n",
+    "        x_max=20,\n",
+    "        epochs=epochs,\n",
+    "        callbacks=[\n",
+    "            tf.keras.callbacks.EarlyStopping(monitor='loss', patience=5),\n",
+    "        ],\n",
+    "        save_model=f'saved_models/mintf={min_term_frequency},skipgram_w={skip_grams_window},epochs={epochs}/glove1.h5',\n",
+    "        save_embedding=f'saved_models/mintf={min_term_frequency},skipgram_w={skip_grams_window},epochs={epochs}/glove1_emb.npy',\n",
+    "    )\n",
+    "else:\n",
+    "    model = glove.load_pretrained_embeddings(model_address='saved_models/mintf=20,skipgram_w=5,epochs=150/glove1.h5')\n",
+    "    word_vectors = glove.load_pretrained_embeddings(model_address='saved_models/mintf=20,skipgram_w=5,epochs=150/glove1_emb.npy')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import wmd\n",
+    "from collections import Counter\n",
+    "wmd_docs = dict()\n",
+    "for dix, doc in enumerate(text):\n",
+    "    words = Counter(t for t in tokenizer(doc) if t in vocabulary)\n",
+    "    sorted_words = sorted(words)\n",
+    "    wmd_docs[str(dix)] = (\n",
+    "        str(dix),\n",
+    "        glove.doc_to_ids(doc, tokenizer, vocabulary),\n",
+    "        np.array([words[t] for t in sorted_words], dtype=np.float32)\n",
+    "    )\n",
+    "    # print(wmd_docs[str(dix)])\n",
+    "\n",
+    "\n",
+    "wmd_calc = wmd.WMD(embeddings=word_vectors2, nbow=wmd_docs)\n",
+    "\n",
+    "# rwmd_model = RWMD$new(dtm, wv)\n",
+    "# rwmd_dist = dist2(dtm[1:22989, ], dtm[132730:224885, ], method = rwmd_model, norm = 'none')\n",
+    "# head(rwmd_dist)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# library(Rtsne)\n",
+    "# library(plotly)\n",
+    "# count = v$term_count  # vocab_size\n",
+    "# tsne <- Rtsne(word_vectors, perplexity = 20, pca = FALSE)\n",
+    "tSNE = manifold.TSNE(perplexity=10)\n",
+    "results = tSNE.fit_transform(word_vectors)\n",
+    "vocabulary_df['TSNE_X'], vocabulary_df['TSNE_Y'] = results[:,0], results[:,1]\n",
+    "\n",
+    "# %%\n",
+    "\n",
+    "plt.figure(figsize=[20,25])\n",
+    "plt.scatter(\n",
+    "    x=vocabulary_df['TSNE_X'],\n",
+    "    y=vocabulary_df['TSNE_Y'],\n",
+    "    # labels=vocabulary['token']\n",
+    "    # s=40 * vocabulary_df['freq'] / vocabulary_df['freq'].max()\n",
+    "    s=np.sqrt(vocabulary_df['freq']),\n",
+    "    alpha=.3,\n",
+    "    # c='#FFFF66'\n",
+    ")\n",
+    "for _,item in vocabulary_df.sort_values('freq', ascending=not True).iloc[:100].iterrows():\n",
+    "    plt.text(item['TSNE_X'], item['TSNE_Y'], item['token'])\n",
+    "\n",
+    "# tsne_plot <- tsne$Y %>%\n",
+    "#   as.data.frame() %>%\n",
+    "#   mutate(word = row.names(word_vectors)) %>%\n",
+    "#   ggplot(aes(x = V1, y = V2, label = word)) +\n",
+    "#   ggtitle(\"t-SNE Russian cluster tweets - < 175\")+\n",
+    "#   geom_point(aes(V1, V2, size = count, alpha =.1), color = \"#FFFF66\")+\n",
+    "#   geom_text_repel(size = 4)+\n",
+    "#   scale_size(range = c(.5, 50))+\n",
+    "#   theme(legend.position = \"none\")\n",
+    "# tsne_plot"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.8.3"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
